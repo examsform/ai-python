@@ -6,12 +6,18 @@ import requests
 import json
 import time
 from SmartApi import SmartConnect
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # 1. UI SETUP & CONFIGURATION
 st.set_page_config(page_title="AI Live Option Chain Pro", layout="wide", page_icon="📈")
 st.title("🚀 AI Real-Time Option Chain & Paper Trading Engine")
-st.markdown("यह टूल एंजेल वन के आधिकारिक सर्वर से लाइव डेटा लेकर 21-स्ट्राइक्स ऑप्शन चेन का AI विश्लेषण, लाइव **Tick History** और **Paper Trading** की सुविधा देता है।")
+st.markdown("यह टूल एंजेल वन के आधिकारिक सर्वर से लाइव डेटा लेकर 21-स्ट्राइक्स ऑप्शन चेन का AI विश्लेषण, IST लाइव **Tick History** और **Paper Trading** की सुविधा देता है।")
+
+# Indian Standard Time (IST) helper
+IST = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_time_str(fmt="%I:%M:%S %p"):
+    return datetime.now(IST).strftime(fmt)
 
 # ---------------------------------------------------------
 # INITIALIZE SESSION STATE FOR PERSISTENCE & HISTORY
@@ -72,7 +78,7 @@ if st.sidebar.button("🔄 Reset Virtual Wallet"):
 
 if st.sidebar.button("🗑️ Clear Price History Log"):
     st.session_state.price_history = []
-    st.sidebar.success("प्राइस हिस्ट्र्री लॉग साफ़ कर दिया गया!")
+    st.sidebar.success("प्राइस हिस्ट्री लॉग साफ़ कर दिया गया!")
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -148,14 +154,14 @@ if client_id and api_key and mpin and totp_secret:
             
             # AI सिग्नल जेनरेशन
             signal, color, pcr, entry, sl, target, desc, trade_type = analyze_market_ai(df_chain, spot_price)
-            last_updated = datetime.now().strftime("%H:%M:%S")
+            last_updated_ist = get_ist_time_str("%I:%M:%S %p")
             
-            # Record Live Tick History Log (Snapshots over time)
+            # Record Live Tick History Log (Snapshots over time with IST Time)
             tick_log = {
-                "Time": last_updated,
+                "Time (IST)": last_updated_ist,
                 "Index": index_choice,
-                "Spot Price": spot_price,
-                "ATM Strike": atm_strike,
+                "Spot Price": f"₹{spot_price:.2f}",
+                "ATM Strike": f"₹{atm_strike}",
                 "PCR": round(pcr, 2),
                 "Signal": signal.split(" (")[0] # Short title
             }
@@ -165,7 +171,7 @@ if client_id and api_key and mpin and totp_secret:
                 st.session_state.price_history.pop(0)
             
             # परिणाम स्क्रीन पर दिखाएं
-            st.markdown(f"<div style='background-color:{color}; padding:25px; border-radius:10px; text-align:center; margin-bottom:20px;'><h2 style='color:white; margin:0;'>{signal}</h2><p style='color:white; margin:5px 0 0 0;'>{desc} (लाइव अपडेट: {last_updated})</p></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='background-color:{color}; padding:25px; border-radius:10px; text-align:center; margin-bottom:20px;'><h2 style='color:white; margin:0;'>{signal}</h2><p style='color:white; margin:5px 0 0 0;'>{desc} (लाइव मार्केट टाइम: {last_updated_ist} IST)</p></div>", unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -179,24 +185,15 @@ if client_id and api_key and mpin and totp_secret:
                 st.metric("AI Target (1:2)", f"₹{target:.2f}" if target > 0 else "-")
             
             # ---------------------------------------------------------
-            # 📈 LIVE TICK HISTORY & PRICE TREND TRACKER
+            # 📜 LIVE TICK & STRIKE HISTORY TABLE (NO CHARTS)
             # ---------------------------------------------------------
             st.markdown("---")
-            st.subheader("📈 Live Price & PCR History Movement (Tick Tracker)")
+            st.subheader("📋 Live Price & PCR History Log (IST Time Tracker)")
             
             if st.session_state.price_history:
                 hist_df = pd.DataFrame(st.session_state.price_history)
-                
-                chart1, chart2 = st.columns(2)
-                with chart1:
-                    st.write("##### Spot Price Movement")
-                    st.line_chart(hist_df.set_index("Time")[["Spot Price"]])
-                with chart2:
-                    st.write("##### PCR Trend Movement")
-                    st.line_chart(hist_df.set_index("Time")[["PCR"]])
-                
-                with st.expander("📋 View Live Ticks History Table (Last 60 Updates)", expanded=True):
-                    st.dataframe(hist_df.iloc[::-1], use_container_width=True) # Latest at top
+                # Display history table with latest tick on top
+                st.dataframe(hist_df.iloc[::-1], use_container_width=True, height=350)
 
             # ---------------------------------------------------------
             # 🎮 AI PAPER TRADING DESK
@@ -231,7 +228,7 @@ if client_id and api_key and mpin and totp_secret:
                         st.session_state.virtual_balance -= required_margin
                         new_pos = {
                             "id": len(st.session_state.open_positions) + len(st.session_state.trade_history) + 1,
-                            "time": datetime.now().strftime("%H:%M:%S"),
+                            "time": get_ist_time_str("%I:%M:%S %p"),
                             "index": index_choice,
                             "strike": trade_strike,
                             "type": trade_option_type,
@@ -260,7 +257,7 @@ if client_id and api_key and mpin and totp_secret:
                     
                     pos_data.append({
                         "ID": pos["id"],
-                        "Time": pos["time"],
+                        "Time (IST)": pos["time"],
                         "Symbol": f"{pos['index']} {pos['strike']} {pos['type']}",
                         "Lots": pos["lots"],
                         "Qty": pos["qty"],
@@ -288,8 +285,8 @@ if client_id and api_key and mpin and totp_secret:
                             st.session_state.virtual_balance += returns
                             st.session_state.trade_history.append({
                                 "ID": pos["id"],
-                                "Entry Time": pos["time"],
-                                "Exit Time": datetime.now().strftime("%H:%M:%S"),
+                                "Entry Time (IST)": pos["time"],
+                                "Exit Time (IST)": get_ist_time_str("%I:%M:%S %p"),
                                 "Symbol": f"{pos['index']} {pos['strike']} {pos['type']}",
                                 "Qty": pos["qty"],
                                 "Buy Price": f"₹{pos['buy_price']:.2f}",
