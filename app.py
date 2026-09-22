@@ -11,10 +11,10 @@ from datetime import datetime
 # 1. UI SETUP & CONFIGURATION
 st.set_page_config(page_title="AI Live Option Chain Pro", layout="wide", page_icon="📈")
 st.title("🚀 AI Real-Time Option Chain & Paper Trading Engine")
-st.markdown("यह टूल एंजेल वन के आधिकारिक सर्वर से लाइव डेटा लेकर 21-स्ट्राइक्स ऑप्शन चेन का AI विश्लेषण और ऑटो-रिफ्रेश के साथ **Paper Trading** की सुविधा देता है।")
+st.markdown("यह टूल एंजेल वन के आधिकारिक सर्वर से लाइव डेटा लेकर 21-स्ट्राइक्स ऑप्शन चेन का AI विश्लेषण, लाइव **Tick History** और **Paper Trading** की सुविधा देता है।")
 
 # ---------------------------------------------------------
-# INITIALIZE SESSION STATE FOR PAPER TRADING
+# INITIALIZE SESSION STATE FOR PERSISTENCE & HISTORY
 # ---------------------------------------------------------
 if "virtual_balance" not in st.session_state:
     st.session_state.virtual_balance = 100000.0  # ₹1 Lakh virtual balance
@@ -24,13 +24,31 @@ if "open_positions" not in st.session_state:
     st.session_state.open_positions = []
 if "trade_history" not in st.session_state:
     st.session_state.trade_history = []
+if "price_history" not in st.session_state:
+    st.session_state.price_history = []  # Live Price & PCR History Log
 
-# 2. SIDEBAR CREDENTIALS & AUTO-REFRESH SETTINGS
+# Credentials persistence keys
+if "client_id_val" not in st.session_state:
+    st.session_state.client_id_val = ""
+if "api_key_val" not in st.session_state:
+    st.session_state.api_key_val = ""
+if "mpin_val" not in st.session_state:
+    st.session_state.mpin_val = ""
+if "totp_secret_val" not in st.session_state:
+    st.session_state.totp_secret_val = ""
+
+# 2. SIDEBAR CREDENTIALS (PERSISTENT Across Auto-Refreshes)
 st.sidebar.header("🔐 Secure Login Settings")
-client_id = st.sidebar.text_input("Client ID", value="")
-api_key = st.sidebar.text_input("API Key", type="password", value="")
-mpin = st.sidebar.text_input("MPIN", type="password", value="")
-totp_secret = st.sidebar.text_input("TOTP Secret Key (Google Auth)", type="password", value="")
+client_id = st.sidebar.text_input("Client ID", value=st.session_state.client_id_val, key="input_client_id")
+api_key = st.sidebar.text_input("API Key", type="password", value=st.session_state.api_key_val, key="input_api_key")
+mpin = st.sidebar.text_input("MPIN", type="password", value=st.session_state.mpin_val, key="input_mpin")
+totp_secret = st.sidebar.text_input("TOTP Secret Key (Google Auth)", type="password", value=st.session_state.totp_secret_val, key="input_totp_secret")
+
+# Save credentials to session state when entered
+st.session_state.client_id_val = client_id
+st.session_state.api_key_val = api_key
+st.session_state.mpin_val = mpin
+st.session_state.totp_secret_val = totp_secret
 
 index_choice = st.sidebar.selectbox("🎯 Target Index", ["NIFTY", "BANKNIFTY"])
 
@@ -52,8 +70,13 @@ if st.sidebar.button("🔄 Reset Virtual Wallet"):
     st.sidebar.success(f"वॉलेट ₹{new_cap:,.2f} से सफलतापूर्वक रीसेट हो गया!")
     st.rerun()
 
+if st.sidebar.button("🗑️ Clear Price History Log"):
+    st.session_state.price_history = []
+    st.sidebar.success("प्राइस हिस्ट्र्री लॉग साफ़ कर दिया गया!")
+    st.rerun()
+
 st.sidebar.markdown("---")
-st.sidebar.info("💡 सुरक्षा सलाह: अपनी कीज़ (Keys) कभी किसी के साथ शेयर न करें। यह कोड पूरी तरह आपके कंप्यूटर या प्राइवेट सर्वर पर सुरक्षित चलता है।")
+st.sidebar.info("💡 सुरक्षा सलाह: आपकी कीज़ सुरक्षित रूप से आपके सत्र (Session State) में सेव रहती हैं। रीफ्रेश होने पर भी क्रेडेंशियल्स गायब नहीं होंगे।")
 
 # 3. DOWNLOAD ANGEL ONE TOKEN MASTER
 @st.cache_data(ttl=28800)
@@ -127,6 +150,20 @@ if client_id and api_key and mpin and totp_secret:
             signal, color, pcr, entry, sl, target, desc, trade_type = analyze_market_ai(df_chain, spot_price)
             last_updated = datetime.now().strftime("%H:%M:%S")
             
+            # Record Live Tick History Log (Snapshots over time)
+            tick_log = {
+                "Time": last_updated,
+                "Index": index_choice,
+                "Spot Price": spot_price,
+                "ATM Strike": atm_strike,
+                "PCR": round(pcr, 2),
+                "Signal": signal.split(" (")[0] # Short title
+            }
+            st.session_state.price_history.append(tick_log)
+            # Limit history log to last 60 ticks
+            if len(st.session_state.price_history) > 60:
+                st.session_state.price_history.pop(0)
+            
             # परिणाम स्क्रीन पर दिखाएं
             st.markdown(f"<div style='background-color:{color}; padding:25px; border-radius:10px; text-align:center; margin-bottom:20px;'><h2 style='color:white; margin:0;'>{signal}</h2><p style='color:white; margin:5px 0 0 0;'>{desc} (लाइव अपडेट: {last_updated})</p></div>", unsafe_allow_html=True)
             
@@ -141,6 +178,26 @@ if client_id and api_key and mpin and totp_secret:
                 st.metric("AI Stop Loss (SL)", f"₹{sl:.2f}" if sl > 0 else "-")
                 st.metric("AI Target (1:2)", f"₹{target:.2f}" if target > 0 else "-")
             
+            # ---------------------------------------------------------
+            # 📈 LIVE TICK HISTORY & PRICE TREND TRACKER
+            # ---------------------------------------------------------
+            st.markdown("---")
+            st.subheader("📈 Live Price & PCR History Movement (Tick Tracker)")
+            
+            if st.session_state.price_history:
+                hist_df = pd.DataFrame(st.session_state.price_history)
+                
+                chart1, chart2 = st.columns(2)
+                with chart1:
+                    st.write("##### Spot Price Movement")
+                    st.line_chart(hist_df.set_index("Time")[["Spot Price"]])
+                with chart2:
+                    st.write("##### PCR Trend Movement")
+                    st.line_chart(hist_df.set_index("Time")[["PCR"]])
+                
+                with st.expander("📋 View Live Ticks History Table (Last 60 Updates)", expanded=True):
+                    st.dataframe(hist_df.iloc[::-1], use_container_width=True) # Latest at top
+
             # ---------------------------------------------------------
             # 🎮 AI PAPER TRADING DESK
             # ---------------------------------------------------------
